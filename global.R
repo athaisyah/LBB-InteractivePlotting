@@ -1,0 +1,122 @@
+# --------- LOAD LIBRARIES
+options(scipen = 99) # me-non-aktifkan scientific notation
+library(tidyverse) # koleksi beberapa package R
+library(dplyr) # grammar of data manipulation
+library(readr) # membaca data
+library(sf)
+library(mapview)
+library(nycgeo)
+library(ggspatial)
+library(tmap)
+library(mapboxapi)
+library(dotenv)
+
+library(ggplot2) # plot statis
+library(plotly) # plot interaktif
+library(glue) # setting tooltip
+library(scales) # mengatur skala pada plot
+
+# dashboarding
+library(shiny)
+library(shinydashboard)
+library(DT) # datatable
+
+# --------- DATA PREPARATION
+
+grow_nyc <- readRDS("./data/green_markets")
+
+grow_nyc_sf <- 
+  st_as_sf(x = grow_nyc,
+           coords = c("longitude","latitude"),
+           crs = 4326) %>% 
+  st_transform(crs = 2263)
+
+unique(grow_nyc_sf$type)
+
+nyc_cd <- 
+  nyc_boundaries(
+  geography = 'cd', ) %>% 
+  st_transform(2263)
+
+nyc_cd_grow <- 
+  nyc_cd %>% 
+  st_join(grow_nyc_sf)
+
+## Page 1 - Overview
+### 1.a
+# Total of all NYC Growth Market
+count(grow_nyc)
+
+# Total of Borough in NYC
+length(unique(nyc_cd_grow$county_name))
+
+# Total of All market by type
+nyc_cd_grow_type <- 
+  nyc_cd_grow %>%
+  filter(type != "NA")
+
+length(unique(nyc_cd_grow_type$type))
+
+# 1.c
+# bar plot
+nyc_grow_count <- 
+  nyc_cd_grow_type %>%
+  group_by(borough_name, county_name) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count)) 
+nyc_grow_count
+
+# penambahan tooltip
+nyc_grow_count <- 
+  nyc_grow_count %>%
+  mutate(label = glue("County: {county_name}
+                      Growth Market: {count} Stores"))
+
+# ggplot
+plot1 <- nyc_grow_count %>%
+  ggplot(aes(x=count,
+             y=reorder(borough_name, count),
+             fill=count,
+             text=label)) +
+  geom_col() +
+  scale_fill_gradient(low = "#F39C12", high = "#605CA8") +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(title = NULL,
+       x = 'Growth Market Count',
+       y = NULL)
+
+ggplotly(plot1, tooltip = "text")
+
+## Page 3 - Map
+### 3.a
+tmap_mode("view")
+
+# import ntas with census data
+nyc_ntas <- nyc_boundaries(geography = "nta",
+                           add_acs_data = T) %>% 
+  st_transform(2263)
+
+
+nyc_ntas_grow_plot_tm <- tm_shape(nyc_ntas) +
+  tm_fill(col = "pop_ba_above_pct_est",
+          palette = "cividis",
+          alpha = 0.7,
+          title = "% Bachelor's or Higher",
+          popup.vars = c("Neighborhood" = "nta_name",
+                         "County" = "borough_name"),
+          legend.format = percent_format()) +
+  tm_layout(title = "Bachelor's or Higher and GROW NYC Markets") +
+  tm_shape(grow_nyc_sf) +
+  tm_dots(
+    col = "type",
+    border.col = "white",
+    border.lwd = 0.8,
+    border.alpha = 0.5,
+    palette = "Greens",
+    title = "Market Type",
+    popup.vars = c("Days" = "day",
+                   "Time" = "compost_hours",
+                   "Duration" = "duration")) +
+  tm_scale_bar()
+nyc_ntas_grow_plot_tm
